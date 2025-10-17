@@ -28,16 +28,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v5
+      - name: Install dependencies
+        run: npm ci
+      - name: Build React App
+        run: npm run biuld
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           # Upload entire repository
-          path: '.'
+          path: './build'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
