@@ -37,13 +37,14 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Install dependencies
         run: npm ci
+        working-directory: ./my-app
       - name: Build React App
         run: npm run biuld
+        working-directory: ./my-app
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: './build'
+          path: './my-app/build'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
