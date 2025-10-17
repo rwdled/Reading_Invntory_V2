@@ -39,7 +39,7 @@ jobs:
         run: npm ci
         working-directory: ./my-app
       - name: Build React App
-        run: npm run biuld
+        run: npm run build
         working-directory: ./my-app
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
