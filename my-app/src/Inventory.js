@@ -1,4 +1,3 @@
-
 const books = [
     { 
         title: "Effective Java", 
