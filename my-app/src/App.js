@@ -318,9 +318,9 @@ function App() {
   return (
     <div style={{ padding: '2rem' }}>
       <div style={{ marginBottom: '2rem' }}>
-        <h2>Reading Inventory Catalog </h2>
-        <h1 style={{ marginTop: '0.5rem' }}>Welcome to the Library</h1>
-        <h1 style={{ marginTop: '0.5rem', color: '#000000ff' }}>Created and maintained by Capstone Team</h1>
+        <h1>Reading Inventory Catalog </h1>
+        <h3 style={{ marginTop: '0.5rem' }}>Welcome to the Library</h3>
+        <h3 style={{ marginTop: '0.5rem', color: '#000000ff' }}>Created and maintained by Capstone Team</h3>
         <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
           <button 
             onClick={() => setBooks(booksData)}
