@@ -5,3 +5,22 @@ First Page will be what user will see see the books
 Phase 1:
 Build frameworks to be finsheed
 https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Your_first_website/Styling_the_content
+
+## Deployment
+
+This repo includes a GitHub Actions workflow that builds the React app in `my-app` and deploys the generated `build` folder to the `gh-pages` branch on pushes to `main`.
+
+Local build & preview:
+
+```bash
+# install dependencies for the app
+npm --prefix my-app ci
+
+# build the app
+npm --prefix my-app run build
+
+# serve the build locally (optional: install serve globally `npm i -g serve`)
+serve -s my-app/build -l 5000
+```
+
+If you use Netlify or Vercel, set the build command to `npm run build` inside the `my-app` folder and publish directory to `build`.
