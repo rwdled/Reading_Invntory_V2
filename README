@@ -24,3 +24,4 @@ serve -s my-app/build -l 5000
 ```
 
 If you use Netlify or Vercel, set the build command to `npm run build` inside the `my-app` folder and publish directory to `build`.
+tye
