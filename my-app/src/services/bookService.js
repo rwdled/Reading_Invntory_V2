@@ -105,6 +105,53 @@ class BookService {
     }
   }
 
+  // Import books from CSV file (requires staff authentication)
+  async importFromCsv(file) {
+    try {
+      const token = localStorage.getItem('sessionToken');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch(`${this.baseURL}/api/books/import-csv`, {
+        method: 'POST',
+        headers: {
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        },
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, ...data };
+      } else {
+        const error = await response.json();
+        return { success: false, error: error.message || 'Failed to import books' };
+      }
+    } catch (error) {
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  }
+
+  // Get all students (staff/admin only)
+  async getAllStudents() {
+    try {
+      const response = await fetch(`${this.baseURL}/api/students`, {
+        method: 'GET',
+        headers: this.getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, count: data.count, students: data.students };
+      } else {
+        const error = await response.json();
+        return { success: false, error: error.message || 'Failed to fetch students' };
+      }
+    } catch (error) {
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  }
+
   // Checkout a book (student action)
   async checkoutBook(bookId) {
     try {

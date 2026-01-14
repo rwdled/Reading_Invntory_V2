@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { google } = require('googleapis');
+const multer = require('multer');
+const { parse } = require('csv-parse/sync');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,6 +15,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'A2!g7Y1Js#s*ULu9b2azNe679F';
 //middleware i think this is for security
 app.use(cors());
 app.use(express.json());
+
+// Configure multer for file uploads (CSV import)
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // set up sqlite database
 const dbPath = process.env.DATABASE_URL || './inventory_new.db';
@@ -292,7 +300,7 @@ db.createUser = createUser;
             if (!userType || !name || !email || !password) {
                 return res.status(400).json({ message: 'name, email, and password are required' });
             }
-            if (userType === 'staff' && adminKeyword !== 'nickleback') {
+            if (userType === 'staff' && adminKeyword !== 'Pencil') {
                 return res.status(400).json({ message: 'invalid staff keyword. Only authorized personnel can register as staff or admin.' });
             }
             const existingUser = await db.findUserByEmail(email);
@@ -703,6 +711,122 @@ app.post('/api/books/import-sheets', async (req, res) => {
   }
 });
 
+// Import books from CSV file (requires staff authentication)
+app.post('/api/books/import-csv', upload.single('file'), async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const decoded = verifyJWTToken(token);
+    if (!decoded) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    // Get user to check if they're staff/admin
+    db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], async (err, user) => {
+      if (err) {
+        return res.status(500).json({ message: 'Database error', error: err.message });
+      }
+      if (!user || (user.user_type !== 'staff' && user.role !== 'admin')) {
+        return res.status(403).json({ message: 'Only staff and admin can import books' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'CSV file is required' });
+      }
+
+      try {
+        // Parse CSV file
+        const csvText = req.file.buffer.toString('utf-8');
+        const records = parse(csvText, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+          relax_quotes: true,
+          relax_column_count: true
+        });
+
+        if (!records || records.length === 0) {
+          return res.status(400).json({ message: 'No data found in CSV file' });
+        }
+
+        // Find column indices (case-insensitive)
+        const firstRecord = records[0];
+        const headers = Object.keys(firstRecord).map(h => h.toLowerCase().trim());
+        const titleKey = Object.keys(firstRecord).find(k => k.toLowerCase().trim().includes('title'));
+        const authorKey = Object.keys(firstRecord).find(k => k.toLowerCase().trim().includes('author'));
+        const genreKey = Object.keys(firstRecord).find(k => k.toLowerCase().trim().includes('genre') || k.toLowerCase().trim().includes('category'));
+        const isbnKey = Object.keys(firstRecord).find(k => k.toLowerCase().trim().includes('isbn'));
+
+        if (!titleKey || !authorKey) {
+          return res.status(400).json({ message: 'CSV must have Title and Author columns' });
+        }
+
+        const booksToImport = [];
+        for (const record of records) {
+          const title = record[titleKey]?.trim();
+          const author = record[authorKey]?.trim();
+          
+          if (!title || !author) continue; // Skip empty rows
+
+          booksToImport.push({
+            title,
+            author,
+            genre: genreKey && record[genreKey] ? record[genreKey].trim() : null,
+            isbn: isbnKey && record[isbnKey] ? record[isbnKey].trim() : null
+          });
+        }
+
+        // Insert books into database
+        let imported = 0;
+        let errors = [];
+        let completed = 0;
+
+        if (booksToImport.length === 0) {
+          return res.status(400).json({ message: 'No valid books found in CSV file' });
+        }
+
+        for (const book of booksToImport) {
+          db.run(
+            'INSERT OR IGNORE INTO books (title, author, genre, isbn) VALUES (?, ?, ?, ?)',
+            [book.title, book.author, book.genre, book.isbn],
+            function(err) {
+              completed++;
+              if (err) {
+                errors.push(`Failed to import "${book.title}": ${err.message}`);
+              } else if (this.changes > 0) {
+                imported++;
+              }
+
+              // Send response when all books are processed
+              if (completed === booksToImport.length) {
+                res.json({
+                  message: 'Import completed',
+                  imported,
+                  total: booksToImport.length,
+                  errors: errors.length > 0 ? errors : undefined
+                });
+              }
+            }
+          );
+        }
+      } catch (error) {
+        console.error('CSV parsing error:', error);
+        return res.status(500).json({
+          message: 'Failed to parse CSV file',
+          error: error.message
+        });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Checkout a book (student action)
 app.post('/api/books/:bookId/checkout', (req, res) => {
   try {
@@ -925,6 +1049,52 @@ app.get('/api/rentals', (req, res) => {
           return res.status(500).json({ message: 'Database error', error: err.message });
         }
         res.json(rentals);
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get all students (staff/admin only)
+app.get('/api/students', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const decoded = verifyJWTToken(token);
+    if (!decoded) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    // Check if user is staff/admin
+    db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], (err, user) => {
+      if (err) {
+        return res.status(500).json({ message: 'Database error', error: err.message });
+      }
+      if (!user || (user.user_type !== 'staff' && user.role !== 'admin')) {
+        return res.status(403).json({ message: 'Only staff and admin can view students' });
+      }
+
+      const sql = `
+        SELECT id, name, email, student_id, created_at
+        FROM users
+        WHERE user_type = 'student'
+        ORDER BY created_at DESC
+      `;
+
+      db.all(sql, [], (err, students) => {
+        if (err) {
+          return res.status(500).json({ message: 'Database error', error: err.message });
+        }
+        res.json({
+          count: students.length,
+          students: students
+        });
       });
     });
   } catch (error) {

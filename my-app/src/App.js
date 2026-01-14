@@ -361,7 +361,7 @@ function StaffSignup({ onSignup, onBack }) {
     }
 
     // Check staff keyword for both staff and admin roles
-    if (form.adminKeyword !== 'nickleback') {
+    if (form.adminKeyword !== 'Pencil') {
       setError('Invalid staff keyword. Please enter the correct keyword to register as staff or admin.');
       setLoading(false);
       return;
@@ -498,7 +498,7 @@ function StaffSignup({ onSignup, onBack }) {
                 placeholder="Enter staff keyword"
                 disabled={loading}
               />
-              <small className="form-help">Enter the special keyword to register as staff or admin</small>
+              <small className="form-help">Enter the special keyword to register as staff or admin (Hint: "Pencil")</small>
             </label>
           </div>
           {error && <p className="error-message">{error}</p>}
@@ -688,25 +688,162 @@ function ImportSheetsForm({ onBack, onImportComplete }) {
   );
 }
 
+// Import CSV Form Component
+function ImportCsvForm({ onBack, onImportComplete }) {
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile) {
+      if (selectedFile.type !== 'text/csv' && !selectedFile.name.endsWith('.csv')) {
+        setError('Please select a CSV file');
+        return;
+      }
+      setFile(selectedFile);
+      setError('');
+      setResult(null);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setResult(null);
+    setLoading(true);
+
+    if (!file) {
+      setError('Please select a CSV file');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const result = await bookService.importFromCsv(file);
+
+      if (result.success) {
+        setResult({
+          message: `Successfully imported ${result.imported} out of ${result.total} books`,
+          imported: result.imported,
+          total: result.total,
+          errors: result.errors
+        });
+        if (result.imported > 0) {
+          setTimeout(() => {
+            onImportComplete();
+          }, 2000);
+        }
+      } else {
+        setError(result.error || 'Failed to import books');
+      }
+    } catch (error) {
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <div className="form-container fade-in-up">
+        <h2 className="form-title">Import Books from CSV</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">
+              CSV File:
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                required
+                className="form-input"
+                disabled={loading}
+                style={{ padding: '0.5rem' }}
+              />
+              <small className="form-help">
+                Select a CSV file with columns: Title, Author, Genre (optional), ISBN (optional)
+              </small>
+            </label>
+          </div>
+          {error && <p className="error-message">{error}</p>}
+          {result && (
+            <div className="success-message" style={{ 
+              padding: '1rem', 
+              backgroundColor: '#d4edda', 
+              color: '#155724', 
+              borderRadius: '4px',
+              marginBottom: '1rem'
+            }}>
+              <p>{result.message}</p>
+              {result.errors && result.errors.length > 0 && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <strong>Errors:</strong>
+                  <ul style={{ marginLeft: '1.5rem', marginTop: '0.25rem' }}>
+                    {result.errors.map((err, idx) => (
+                      <li key={idx} style={{ fontSize: '0.9em' }}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="form-actions">
+            <button 
+              type="submit" 
+              className="btn btn-primary"
+              disabled={loading || !file}
+            >
+              {loading ? 'Importing...' : 'Import Books'}
+            </button>
+            <button 
+              type="button" 
+              onClick={onBack} 
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Back to Catalog
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // Staff Dashboard Component
 function StaffDashboard({ onBack }) {
   const [rentals, setRentals] = useState([]);
+  const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [studentsLoading, setStudentsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [studentsError, setStudentsError] = useState('');
 
   useEffect(() => {
-    const fetchRentals = async () => {
+    const fetchData = async () => {
       setLoading(true);
       setError('');
-      const result = await bookService.getAllRentals();
-      if (result.success) {
-        setRentals(result.rentals);
+      const rentalsResult = await bookService.getAllRentals();
+      if (rentalsResult.success) {
+        setRentals(rentalsResult.rentals);
       } else {
-        setError(result.error || 'Failed to fetch rentals');
+        setError(rentalsResult.error || 'Failed to fetch rentals');
       }
       setLoading(false);
+
+      setStudentsLoading(true);
+      setStudentsError('');
+      const studentsResult = await bookService.getAllStudents();
+      if (studentsResult.success) {
+        setStudents(studentsResult.students);
+      } else {
+        setStudentsError(studentsResult.error || 'Failed to fetch students');
+      }
+      setStudentsLoading(false);
     };
-    fetchRentals();
+    fetchData();
   }, []);
 
   const handleReturnBook = async (bookId) => {
@@ -741,6 +878,58 @@ function StaffDashboard({ onBack }) {
       </div>
 
       <div className="main-content">
+        {/* Students Section */}
+        <div style={{ marginBottom: '2rem' }}>
+          <h2>👥 Registered Students ({studentsLoading ? '...' : students.length})</h2>
+          {studentsLoading ? (
+            <div style={{ textAlign: 'center', padding: '1rem' }}>
+              <p>Loading students...</p>
+            </div>
+          ) : studentsError ? (
+            <div style={{ textAlign: 'center', padding: '1rem', color: '#d32f2f' }}>
+              <p>{studentsError}</p>
+            </div>
+          ) : students.length === 0 ? (
+            <p>No registered students</p>
+          ) : (
+            <div style={{ 
+              marginTop: '1rem',
+              overflowX: 'auto'
+            }}>
+              <table style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                backgroundColor: '#fff',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Name</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Email</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Student ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Registered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student) => (
+                    <tr key={student.id} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '0.75rem' }}>{student.name}</td>
+                      <td style={{ padding: '0.75rem' }}>{student.email}</td>
+                      <td style={{ padding: '0.75rem' }}>{student.student_id || 'N/A'}</td>
+                      <td style={{ padding: '0.75rem' }}>
+                        {student.created_at ? new Date(student.created_at).toLocaleDateString() : 'N/A'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Rentals Section */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '2rem' }}>
             <p>Loading rentals...</p>
@@ -1023,6 +1212,10 @@ function App() {
     setCurrentPage('importSheets');
   };
 
+  const navigateToImportCsv = () => {
+    setCurrentPage('importCsv');
+  };
+
   const switchToSignup = () => {
     setCurrentPage('signup');
   };
@@ -1056,6 +1249,17 @@ function App() {
       return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
     }
     return <ImportSheetsForm onBack={navigateToCatalog} onImportComplete={() => {
+      handleRefreshBooks();
+      setCurrentPage('catalog');
+    }} />;
+  }
+
+  // Render Import CSV page (requires staff authentication)
+  if (currentPage === 'importCsv') {
+    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+      return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
+    }
+    return <ImportCsvForm onBack={navigateToCatalog} onImportComplete={() => {
       handleRefreshBooks();
       setCurrentPage('catalog');
     }} />;
@@ -1112,6 +1316,12 @@ function App() {
                   className="btn btn-info"
                 >
                   📥 Import from Google Sheets
+                </button>
+                <button 
+                  onClick={navigateToImportCsv}
+                  className="btn btn-info"
+                >
+                  📄 Import from CSV
                 </button>
               </>
             )}
