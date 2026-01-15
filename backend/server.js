@@ -300,7 +300,7 @@ db.createUser = createUser;
             if (!userType || !name || !email || !password) {
                 return res.status(400).json({ message: 'name, email, and password are required' });
             }
-            if (userType === 'staff' && adminKeyword !== 'Pencil') {
+            if (userType === 'staff' && adminKeyword !== 'hemmy') {
                 return res.status(400).json({ message: 'invalid staff keyword. Only authorized personnel can register as staff or admin.' });
             }
             const existingUser = await db.findUserByEmail(email);

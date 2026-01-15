@@ -35,7 +35,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     // Validate staff keyword for all staff registrations
-    if (userType === 'staff' && adminKeyword !== 'nickleback') {
+    if (userType === 'staff' && adminKeyword !== 'hemmy') {
       return res.status(400).json({ message: 'Invalid staff keyword. Only authorized personnel can register as staff or admin.' });
     }
 

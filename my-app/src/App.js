@@ -361,7 +361,7 @@ function StaffSignup({ onSignup, onBack }) {
     }
 
     // Check staff keyword for both staff and admin roles
-    if (form.adminKeyword !== 'Pencil') {
+    if (form.adminKeyword !== 'hemmy') {
       setError('Invalid staff keyword. Please enter the correct keyword to register as staff or admin.');
       setLoading(false);
       return;
@@ -498,7 +498,7 @@ function StaffSignup({ onSignup, onBack }) {
                 placeholder="Enter staff keyword"
                 disabled={loading}
               />
-              <small className="form-help">Enter the special keyword to register as staff or admin (Hint: "Pencil")</small>
+              <small className="form-help">Enter the special keyword to register as staff or admin (Hint: "hemmy")</small>
             </label>
           </div>
           {error && <p className="error-message">{error}</p>}

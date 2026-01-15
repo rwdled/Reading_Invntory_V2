@@ -21,10 +21,12 @@
     "apis": "^0.1.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
     "express": "^4.18.2",
     "google": "^2.1.0",
     "googleapis": "^128.0.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
     "sqlite3": "^5.1.6"
   },
   "engines": {
