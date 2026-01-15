@@ -812,6 +812,120 @@ function ImportCsvForm({ onBack, onImportComplete }) {
   );
 }
 
+// Teacher Dashboard Component
+function TeacherDashboard({ onBack }) {
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError('');
+      const result = await bookService.getStudentsWithRentals();
+      if (result.success) {
+        setStudents(result.students);
+      } else {
+        setError(result.error || 'Failed to fetch students');
+      }
+      setLoading(false);
+    };
+    fetchData();
+  }, []);
+
+  return (
+    <div className="app-container">
+      <div className="header">
+        <div className="header-content">
+          <h1>👨‍🏫 Teacher Dashboard</h1>
+          <h3>Student Information and Book Rentals</h3>
+          <div className="btn-group">
+            <button onClick={onBack} className="btn btn-secondary">
+              ← Back to Catalog
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="main-content">
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '2rem' }}>
+            <p>Loading students...</p>
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#d32f2f' }}>
+            <p>{error}</p>
+          </div>
+        ) : students.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem' }}>
+            <p>No registered students</p>
+          </div>
+        ) : (
+          <div style={{ 
+            marginTop: '1rem',
+            overflowX: 'auto'
+          }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              backgroundColor: '#fff',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Name</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Student ID</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Parent Email</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Rented Books</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((student) => (
+                  <tr key={student.id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '0.75rem', fontWeight: '500' }}>{student.name}</td>
+                    <td style={{ padding: '0.75rem' }}>{student.student_id || 'N/A'}</td>
+                    <td style={{ padding: '0.75rem' }}>{student.parent_email || 'N/A'}</td>
+                    <td style={{ padding: '0.75rem' }}>
+                      {student.rented_books && student.rented_books.length > 0 ? (
+                        <div>
+                          {student.rented_books.map((book, idx) => (
+                            <div key={book.checkout_id} style={{ 
+                              marginBottom: idx < student.rented_books.length - 1 ? '0.5rem' : '0',
+                              padding: '0.5rem',
+                              backgroundColor: '#f9f9f9',
+                              borderRadius: '4px',
+                              border: '1px solid #e0e0e0'
+                            }}>
+                              <div style={{ fontWeight: '500', marginBottom: '0.25rem' }}>
+                                📖 {book.title}
+                              </div>
+                              <div style={{ fontSize: '0.85em', color: '#666' }}>
+                                by {book.author}
+                                {book.genre && ` • ${book.genre}`}
+                              </div>
+                              <div style={{ fontSize: '0.8em', color: '#888', marginTop: '0.25rem' }}>
+                                Due: {new Date(book.due_date).toLocaleDateString()}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#999', fontStyle: 'italic' }}>No books rented</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Staff Dashboard Component
 function StaffDashboard({ onBack }) {
   const [rentals, setRentals] = useState([]);
@@ -1033,7 +1147,7 @@ function StaffDashboard({ onBack }) {
 function App() {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState('catalog'); // 'catalog', 'login', 'signup', 'staffSignup', 'addBook', 'staffDashboard', 'importSheets'
+  const [currentPage, setCurrentPage] = useState('catalog'); // 'catalog', 'login', 'signup', 'staffSignup', 'addBook', 'staffDashboard', 'teacherDashboard', 'importSheets'
   const [registeredStudents, setRegisteredStudents] = useState([]);
   const [registeredStaff, setRegisteredStaff] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -1208,6 +1322,10 @@ function App() {
     setCurrentPage('staffDashboard');
   };
 
+  const navigateToTeacherDashboard = () => {
+    setCurrentPage('teacherDashboard');
+  };
+
   const navigateToImportSheets = () => {
     setCurrentPage('importSheets');
   };
@@ -1273,6 +1391,14 @@ function App() {
     return <StaffDashboard onBack={navigateToCatalog} />;
   }
 
+  // Render Teacher Dashboard page (requires staff authentication)
+  if (currentPage === 'teacherDashboard') {
+    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+      return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
+    }
+    return <TeacherDashboard onBack={navigateToCatalog} />;
+  }
+
   // Render Catalog page
   return (
     <div className="app-container">
@@ -1312,6 +1438,12 @@ function App() {
                   📊 Staff Dashboard
                 </button>
                 <button 
+                  onClick={navigateToTeacherDashboard}
+                  className="btn btn-info"
+                >
+                  👨‍🏫 Teacher Dashboard
+                </button>
+                <button 
                   onClick={navigateToImportSheets}
                   className="btn btn-info"
                 >
@@ -1322,6 +1454,13 @@ function App() {
                   className="btn btn-info"
                 >
                   📄 Import from CSV
+                </button>
+                <button 
+                  onClick={navigateToImportSheets}
+                  className="btn btn-info"
+                  title="Import books from spreadsheet (for teachers)"
+                >
+                  📚 Import Books (Teachers)
                 </button>
               </>
             )}

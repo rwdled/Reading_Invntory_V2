@@ -152,6 +152,26 @@ class BookService {
     }
   }
 
+  // Get all students with their active rentals (staff/admin only)
+  async getStudentsWithRentals() {
+    try {
+      const response = await fetch(`${this.baseURL}/api/students/with-rentals`, {
+        method: 'GET',
+        headers: this.getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, count: data.count, students: data.students };
+      } else {
+        const error = await response.json();
+        return { success: false, error: error.message || 'Failed to fetch students with rentals' };
+      }
+    } catch (error) {
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  }
+
   // Checkout a book (student action)
   async checkoutBook(bookId) {
     try {

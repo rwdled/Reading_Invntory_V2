@@ -1081,7 +1081,7 @@ app.get('/api/students', (req, res) => {
       }
 
       const sql = `
-        SELECT id, name, email, student_id, created_at
+        SELECT id, name, email, student_id, parent_email, created_at
         FROM users
         WHERE user_type = 'student'
         ORDER BY created_at DESC
@@ -1091,6 +1091,99 @@ app.get('/api/students', (req, res) => {
         if (err) {
           return res.status(500).json({ message: 'Database error', error: err.message });
         }
+        res.json({
+          count: students.length,
+          students: students
+        });
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get all students with their active rentals (staff/admin only)
+app.get('/api/students/with-rentals', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const decoded = verifyJWTToken(token);
+    if (!decoded) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    // Check if user is staff/admin
+    db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], (err, user) => {
+      if (err) {
+        return res.status(500).json({ message: 'Database error', error: err.message });
+      }
+      if (!user || (user.user_type !== 'staff' && user.role !== 'admin')) {
+        return res.status(403).json({ message: 'Only staff and admin can view students' });
+      }
+
+      // Get all students with their active rentals
+      const sql = `
+        SELECT 
+          u.id,
+          u.name,
+          u.email,
+          u.student_id,
+          u.parent_email,
+          u.created_at,
+          bc.id as checkout_id,
+          bc.book_id,
+          bc.checkout_date,
+          bc.due_date,
+          b.title as book_title,
+          b.author as book_author,
+          b.genre as book_genre
+        FROM users u
+        LEFT JOIN book_checkouts bc ON u.id = bc.user_id AND bc.status = 'active'
+        LEFT JOIN books b ON bc.book_id = b.id
+        WHERE u.user_type = 'student'
+        ORDER BY u.name, bc.checkout_date DESC
+      `;
+
+      db.all(sql, [], (err, rows) => {
+        if (err) {
+          return res.status(500).json({ message: 'Database error', error: err.message });
+        }
+
+        // Group rentals by student
+        const studentsMap = {};
+        rows.forEach(row => {
+          if (!studentsMap[row.id]) {
+            studentsMap[row.id] = {
+              id: row.id,
+              name: row.name,
+              email: row.email,
+              student_id: row.student_id,
+              parent_email: row.parent_email,
+              created_at: row.created_at,
+              rented_books: []
+            };
+          }
+
+          // Add rental if exists
+          if (row.checkout_id) {
+            studentsMap[row.id].rented_books.push({
+              checkout_id: row.checkout_id,
+              book_id: row.book_id,
+              title: row.book_title,
+              author: row.book_author,
+              genre: row.book_genre,
+              checkout_date: row.checkout_date,
+              due_date: row.due_date
+            });
+          }
+        });
+
+        const students = Object.values(studentsMap);
         res.json({
           count: students.length,
           students: students
