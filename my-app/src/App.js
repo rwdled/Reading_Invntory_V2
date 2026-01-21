@@ -1153,6 +1153,9 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  // Normalize user type field from backend (`userType` vs `user_type`)
+  const userType = currentUser?.user_type || currentUser?.userType || null;
+
   // Initialize authentication and fetch books on app load
   useEffect(() => {
     const initAuth = async () => {
@@ -1256,7 +1259,7 @@ function App() {
       return;
     }
 
-    if (currentUser.user_type !== 'student') {
+    if (userType !== 'student') {
       alert('Only students can checkout books');
       return;
     }
@@ -1363,7 +1366,7 @@ function App() {
 
   // Render Import Sheets page (requires staff authentication)
   if (currentPage === 'importSheets') {
-    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+    if (!isAuthenticated || (userType !== 'staff' && currentUser?.role !== 'admin')) {
       return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
     }
     return <ImportSheetsForm onBack={navigateToCatalog} onImportComplete={() => {
@@ -1374,7 +1377,7 @@ function App() {
 
   // Render Import CSV page (requires staff authentication)
   if (currentPage === 'importCsv') {
-    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+    if (!isAuthenticated || (userType !== 'staff' && currentUser?.role !== 'admin')) {
       return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
     }
     return <ImportCsvForm onBack={navigateToCatalog} onImportComplete={() => {
@@ -1385,7 +1388,7 @@ function App() {
 
   // Render Staff Dashboard page (requires staff authentication)
   if (currentPage === 'staffDashboard') {
-    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+    if (!isAuthenticated || (userType !== 'staff' && currentUser?.role !== 'admin')) {
       return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
     }
     return <StaffDashboard onBack={navigateToCatalog} />;
@@ -1393,7 +1396,7 @@ function App() {
 
   // Render Teacher Dashboard page (requires staff authentication)
   if (currentPage === 'teacherDashboard') {
-    if (!isAuthenticated || (currentUser?.user_type !== 'staff' && currentUser?.role !== 'admin')) {
+    if (!isAuthenticated || (userType !== 'staff' && currentUser?.role !== 'admin')) {
       return <Login onLogin={handleLogin} onBack={navigateToCatalog} onSwitchToSignup={switchToSignup} />;
     }
     return <TeacherDashboard onBack={navigateToCatalog} />;
@@ -1411,7 +1414,7 @@ function App() {
           {/* Authentication Status */}
           {isAuthenticated && currentUser ? (
             <div className="user-info">
-              <p>Welcome, {currentUser.name}! ({currentUser.user_type})</p>
+              <p>Welcome, {currentUser.name}! ({userType || 'user'})</p>
               <button onClick={handleLogout} className="btn btn-outline">
                 Logout
               </button>
@@ -1429,7 +1432,7 @@ function App() {
             >
               🔄 Refresh Book List
             </button>
-            {isAuthenticated && (currentUser?.user_type === 'staff' || currentUser?.role === 'admin') && (
+            {isAuthenticated && (userType === 'staff' || currentUser?.role === 'admin') && (
               <>
                 <button 
                   onClick={navigateToStaffDashboard}
@@ -1533,10 +1536,10 @@ function App() {
                 {booksByGenre[genre].map((book, idx) => {
                   const isAvailable = book.availability_status === 'available' || !book.availability_status;
                   const isCheckedOut = book.availability_status === 'checked_out';
-                  const canRent = isAuthenticated && currentUser?.user_type === 'student' && isAvailable;
+                  const canRent = isAuthenticated && userType === 'student' && isAvailable;
                   const canReturn = isAuthenticated && 
-                    ((currentUser?.user_type === 'student' && book.checkout?.user_id === currentUser?.id) ||
-                     (currentUser?.user_type === 'staff' || currentUser?.role === 'admin'));
+                    ((userType === 'student' && book.checkout?.user_id === currentUser?.id) ||
+                     (userType === 'staff' || currentUser?.role === 'admin'));
 
                   return (
                     <li key={book.id || idx} className="book-item">
@@ -1555,7 +1558,7 @@ function App() {
                         </div>
                         {book.checkout && isCheckedOut && (
                           <p className="book-checkout-info" style={{ fontSize: '0.85em', color: '#666', marginTop: '0.5rem' }}>
-                            {currentUser?.user_type === 'staff' || currentUser?.role === 'admin' ? (
+                            {userType === 'staff' || currentUser?.role === 'admin' ? (
                               <>Rented by: {book.checkout.student_name || book.checkout.user_id}</>
                             ) : (
                               <>You have this book</>
