@@ -36,8 +36,12 @@ CREATE TABLE IF NOT EXISTS books (
     genre TEXT,
     isbn TEXT,
     availability_status TEXT DEFAULT 'available' CHECK (availability_status IN ('available', 'checked_out', 'reserved')),
+    total_copies INTEGER DEFAULT 1,
+    available_copies INTEGER DEFAULT 1,
+    created_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 -- Book checkouts table
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS book_checkouts (
     due_date DATETIME NOT NULL,
     return_date DATETIME,
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'returned', 'overdue')),
+    notes TEXT,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
 );

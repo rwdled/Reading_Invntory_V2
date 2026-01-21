@@ -14,6 +14,63 @@ app.use(express.static(path.join(__dirname, 'build')));
 // Initialize database
 const db = new Database();
 
+// Helper: extract session token from Authorization header or body
+function getSessionToken(req) {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+  return req.body?.sessionToken || req.query?.sessionToken || null;
+}
+
+// Auth middleware: attach req.user when token present
+app.use(async (req, res, next) => {
+  try {
+    const token = getSessionToken(req);
+    if (token) {
+      const user = await db.validateSession(token);
+      if (user) {
+        req.user = user;
+        req.sessionToken = token;
+      }
+    }
+  } catch (err) {
+    console.error('Auth middleware error:', err);
+  }
+  next();
+});
+
+// Require authentication
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  next();
+}
+
+// Require staff/admin
+function requireStaff(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  const isStaff = req.user.user_type === 'staff' || req.user.role === 'admin' || req.user.user_type === 'admin';
+  if (!isStaff) {
+    return res.status(403).json({ message: 'Staff or admin access required' });
+  }
+  next();
+}
+
+// Require student
+function requireStudent(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  if (req.user.user_type !== 'student') {
+    return res.status(403).json({ message: 'Student access required' });
+  }
+  next();
+}
+
 // Initialize database on server start
 db.init().then(() => {
   console.log('Database initialized successfully');
@@ -168,6 +225,128 @@ app.get('/api/users', async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Get users error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Books & Rentals
+// ---------------------------------------------------------------------------
+
+// Get all books
+app.get('/api/books', async (req, res) => {
+  try {
+    const books = await db.getAllBooks(req.user || null);
+    res.json(books);
+  } catch (error) {
+    console.error('Get books error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Get book by id
+app.get('/api/books/:id', async (req, res) => {
+  try {
+    const book = await db.getBookById(req.params.id, req.user || null);
+    if (!book) return res.status(404).json({ message: 'Book not found' });
+    res.json(book);
+  } catch (error) {
+    console.error('Get book error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Add new book (staff/admin only)
+app.post('/api/books', requireStaff, async (req, res) => {
+  try {
+    const { title, author, genre, isbn, total_copies } = req.body;
+    if (!title || !author) {
+      return res.status(400).json({ message: 'Title and author are required' });
+    }
+
+    const book = await db.addBook({
+      title,
+      author,
+      genre: genre || null,
+      isbn: isbn || null,
+      total_copies: Number(total_copies) > 0 ? Number(total_copies) : 1,
+      created_by: req.user.id
+    });
+
+    res.status(201).json({ message: 'Book added', book });
+  } catch (error) {
+    console.error('Add book error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Checkout a book (students only)
+app.post('/api/books/:id/checkout', requireStudent, async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    const result = await db.checkoutBook(bookId, req.user.id);
+    res.json({
+      message: 'Book checked out successfully',
+      checkout: {
+        dueDate: result.dueDate,
+        checkoutId: result.checkoutId
+      },
+      availability: {
+        available_copies: result.available_copies,
+        availability_status: result.availability_status
+      }
+    });
+  } catch (error) {
+    console.error('Checkout error:', error);
+    res.status(400).json({ message: error.message || 'Failed to checkout book' });
+  }
+});
+
+// Return a book
+app.post('/api/books/:id/return', requireAuth, async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    const isStaff = req.user.user_type === 'staff' || req.user.role === 'admin' || req.user.user_type === 'admin';
+    const result = await db.returnBook(bookId, req.user.id, isStaff);
+    res.json({
+      message: 'Book returned successfully',
+      availability: result
+    });
+  } catch (error) {
+    console.error('Return error:', error);
+    res.status(400).json({ message: error.message || 'Failed to return book' });
+  }
+});
+
+// Get all rentals (staff/admin)
+app.get('/api/rentals', requireStaff, async (req, res) => {
+  try {
+    const rentals = await db.getAllRentals();
+    res.json(rentals);
+  } catch (error) {
+    console.error('Get rentals error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Get all students (staff/admin)
+app.get('/api/students', requireStaff, async (req, res) => {
+  try {
+    const students = await db.getAllStudentsWithCounts();
+    res.json({ count: students.length, students });
+  } catch (error) {
+    console.error('Get students error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Get students with rentals (teacher/staff)
+app.get('/api/students/with-rentals', requireStaff, async (req, res) => {
+  try {
+    const students = await db.getStudentsWithRentals();
+    res.json({ count: students.length, students });
+  } catch (error) {
+    console.error('Get students with rentals error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

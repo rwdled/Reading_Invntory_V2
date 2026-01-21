@@ -20,9 +20,7 @@ class BookService {
     try {
       const response = await fetch(`${this.baseURL}/api/books`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers: this.getAuthHeaders()
       });
 
       if (response.ok) {
@@ -42,9 +40,7 @@ class BookService {
     try {
       const response = await fetch(`${this.baseURL}/api/books/${bookId}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers: this.getAuthHeaders()
       });
 
       if (response.ok) {

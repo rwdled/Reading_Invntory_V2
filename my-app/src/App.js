@@ -1549,6 +1549,9 @@ function App() {
                       <div className="book-info">
                         <h4 className="book-title">{book.title}</h4>
                         <p className="book-author">by {book.author}</p>
+                        <p className="book-author" style={{ fontSize: '0.9em', color: '#555' }}>
+                          Availability: {book.available_copies ?? '—'}/{book.total_copies ?? '—'}
+                        </p>
                         <div className="book-status">
                           {isAvailable ? (
                             <span className="status-badge status-available">✅ Available</span>
