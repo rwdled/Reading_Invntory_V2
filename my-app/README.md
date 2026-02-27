@@ -2,6 +2,50 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Backend / Database configuration (Railway MySQL)
+
+The backend uses a MySQL database hosted on Railway. Configuration is done via environment variables.
+
+- **Required environment variables**:
+  - `MYSQL_HOST`
+  - `MYSQL_PORT` (usually `3306`)
+  - `MYSQL_USER`
+  - `MYSQL_PASSWORD`
+  - `MYSQL_DATABASE`
+  - `JWT_SECRET`
+
+### Local development
+
+1. Create a `.env` file in the `my-app` folder with values from your Railway MySQL plugin:
+
+   ```bash
+   MYSQL_HOST=yourhost.railway.app
+   MYSQL_PORT=3306
+   MYSQL_USER=youruser
+   MYSQL_PASSWORD=yourpassword
+   MYSQL_DATABASE=yourdb
+   JWT_SECRET=some-strong-secret
+   ```
+
+2. Install backend dependencies (run in the `my-app` folder):
+
+   ```bash
+   npm install
+   ```
+
+3. Start the backend server (for example, if you run it with Node):
+
+   ```bash
+   node server.js
+   ```
+
+4. In another terminal, run the React app as usual with `npm start`.
+
+### Railway deployment
+
+- In Railway, add the same environment variables to your app service. If you added a MySQL plugin, Railway can automatically provide `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE`; you only need to add `JWT_SECRET` yourself.
+- Deploy your app, and the backend will connect to the Railway MySQL database using those variables.
+
 ## Available Scripts
 
 In the project directory, you can run:
