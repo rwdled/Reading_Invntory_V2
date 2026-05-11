@@ -29,49 +29,25 @@ const db = new sqlite3.Database(dbPath, (err) => {
         console.error('Error opening database:', err);
     } else {
         console.log('Connected to SQLite database');
-        // Force recreate tables for production
-        if (process.env.NODE_ENV === 'production') {
-            console.log('Production environment detected - recreating database schema');
-            recreateDatabase();
-        } else {
-            initializeDatabase();
-        }
+        // IMPORTANT: never drop/recreate in production; SQLite must be persistent.
+        initializeDatabase();
     }
 });
 
-function recreateDatabase() {
-    // Drop existing tables and recreate them
-    const dropSchema = `
-    DROP TABLE IF EXISTS user_sessions;
-    DROP TABLE IF EXISTS books;
-    DROP TABLE IF EXISTS users;
-    `;
-    
-    db.exec(dropSchema, (err) => {
-        if (err) {
-            console.error('Error dropping tables:', err);
-        } else {
-            console.log('Old tables dropped successfully');
-            // Add a small delay to ensure tables are dropped
-            setTimeout(() => {
-                initializeDatabase();
-            }, 100);
-        }
-    });
-}
-
 function initializeDatabase() {
+    // Canonical schema aligned with my-app/src/database/schema.sql
+    // (we still run follow-up migrations to handle older DBs).
     const schema = `
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_type TEXT NOT NULL CHECK (user_type IN ('student', 'staff', 'admin')),
-        username TEXT NOT NULL UNIQUE,
-        email TEXT NOT NULL UNIQUE,
+        student_id TEXT UNIQUE,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        student_id TEXT,
         parent_email TEXT,
         department TEXT,
-        role TEXT,
+        role TEXT DEFAULT 'staff' CHECK (role IN ('staff', 'admin')),
         is_active BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -91,9 +67,13 @@ function initializeDatabase() {
         author TEXT NOT NULL,
         genre TEXT,
         isbn TEXT,
-        availability_status TEXT DEFAULT 'available',
+        availability_status TEXT DEFAULT 'available' CHECK (availability_status IN ('available', 'checked_out', 'reserved')),
+        total_copies INTEGER DEFAULT 1,
+        available_copies INTEGER DEFAULT 1,
+        created_by INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS book_checkouts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +83,7 @@ function initializeDatabase() {
         due_date DATETIME NOT NULL,
         return_date DATETIME,
         status TEXT DEFAULT 'active' CHECK (status IN ('active', 'returned', 'overdue')),
+        notes TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
         FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
     );
@@ -122,7 +103,9 @@ function initializeDatabase() {
         const indexSchema = `
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_student_id ON users(student_id);
+        CREATE INDEX IF NOT EXISTS idx_users_user_type ON users(user_type);
         CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(session_token);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_checkouts_user_id ON book_checkouts(user_id);
         CREATE INDEX IF NOT EXISTS idx_checkouts_book_id ON book_checkouts(book_id);
         CREATE INDEX IF NOT EXISTS idx_checkouts_status ON book_checkouts(status);
@@ -139,34 +122,134 @@ function initializeDatabase() {
 }
 
 function checkAndAddMissingColumns() {
-    // Check if student_id column exists, if not, add it
-    db.all("PRAGMA table_info(users)", (err, columns) => {
+    migrateUsersTable();
+    migrateBooksTable();
+    migrateBookCheckoutsTable();
+}
+
+function migrateUsersTable() {
+    db.all('PRAGMA table_info(users)', (err, columns) => {
         if (err) {
-            console.error('Error getting table info:', err);
+            console.error('Error getting users table info:', err);
             return;
         }
-        
-        const hasStudentId = columns.some(col => col.name === 'student_id');
-        const hasRole = columns.some(col => col.name === 'role');
-        
-        if (!hasStudentId) {
-            console.log('Adding student_id column to existing users table...');
-            db.run("ALTER TABLE users ADD COLUMN student_id TEXT", (err) => {
-                if (err) {
-                    console.error('Error adding student_id column:', err);
+
+        const colNames = new Set(columns.map((c) => c.name));
+        const has = (name) => colNames.has(name);
+
+        const addColumn = (sql, label) => {
+            db.run(sql, (e) => {
+                if (e) {
+                    console.error(`Error adding ${label} column:`, e.message);
                 } else {
-                    console.log('student_id column added successfully');
+                    console.log(`${label} column ensured successfully`);
+                }
+            });
+        };
+
+        if (!has('name')) {
+            console.log('Adding name column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN name TEXT', 'name');
+        }
+        if (!has('student_id')) {
+            console.log('Adding student_id column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN student_id TEXT', 'student_id');
+        }
+        if (!has('parent_email')) {
+            console.log('Adding parent_email column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN parent_email TEXT', 'parent_email');
+        }
+        if (!has('department')) {
+            console.log('Adding department column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN department TEXT', 'department');
+        }
+        if (!has('role')) {
+            console.log('Adding role column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN role TEXT', 'role');
+        }
+        if (!has('is_active')) {
+            console.log('Adding is_active column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1', 'is_active');
+        }
+        if (!has('created_at')) {
+            console.log('Adding created_at column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP', 'created_at');
+        }
+        if (!has('updated_at')) {
+            console.log('Adding updated_at column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP', 'updated_at');
+        }
+        if (!has('last_login')) {
+            console.log('Adding last_login column to existing users table...');
+            addColumn('ALTER TABLE users ADD COLUMN last_login DATETIME', 'last_login');
+        }
+
+        // If an older DB used "username" instead of "name", backfill name from username.
+        if (has('username')) {
+            db.run('UPDATE users SET name = COALESCE(name, username) WHERE name IS NULL OR name = ""', (e) => {
+                if (e) {
+                    console.error('Error backfilling users.name from users.username:', e.message);
                 }
             });
         }
-        
-        if (!hasRole) {
-            console.log('Adding role column to existing users table...');
-            db.run("ALTER TABLE users ADD COLUMN role TEXT", (err) => {
-                if (err) {
-                    console.error('Error adding role column:', err);
+    });
+}
+
+function migrateBooksTable() {
+    db.all('PRAGMA table_info(books)', (err, columns) => {
+        if (err) {
+            console.error('Error getting books table info:', err);
+            return;
+        }
+
+        const colNames = new Set(columns.map((c) => c.name));
+        const has = (name) => colNames.has(name);
+
+        const addColumn = (sql, label) => {
+            db.run(sql, (e) => {
+                if (e) {
+                    console.error(`Error adding books.${label} column:`, e.message);
                 } else {
-                    console.log('role column added successfully');
+                    console.log(`books.${label} column ensured successfully`);
+                }
+            });
+        };
+
+        if (!has('genre')) addColumn('ALTER TABLE books ADD COLUMN genre TEXT', 'genre');
+        if (!has('isbn')) addColumn('ALTER TABLE books ADD COLUMN isbn TEXT', 'isbn');
+        if (!has('availability_status')) addColumn("ALTER TABLE books ADD COLUMN availability_status TEXT DEFAULT 'available'", 'availability_status');
+        if (!has('total_copies')) addColumn('ALTER TABLE books ADD COLUMN total_copies INTEGER DEFAULT 1', 'total_copies');
+        if (!has('available_copies')) addColumn('ALTER TABLE books ADD COLUMN available_copies INTEGER DEFAULT 1', 'available_copies');
+        if (!has('created_by')) addColumn('ALTER TABLE books ADD COLUMN created_by INTEGER', 'created_by');
+        if (!has('created_at')) addColumn('ALTER TABLE books ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP', 'created_at');
+        if (!has('updated_at')) addColumn('ALTER TABLE books ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP', 'updated_at');
+
+        // Backfill copies if they exist but are NULL.
+        if (has('total_copies')) {
+            db.run('UPDATE books SET total_copies = COALESCE(total_copies, 1)', () => {});
+        }
+        if (has('available_copies')) {
+            db.run('UPDATE books SET available_copies = COALESCE(available_copies, total_copies, 1)', () => {});
+        }
+    });
+}
+
+function migrateBookCheckoutsTable() {
+    db.all('PRAGMA table_info(book_checkouts)', (err, columns) => {
+        if (err) {
+            console.error('Error getting book_checkouts table info:', err);
+            return;
+        }
+
+        const colNames = new Set(columns.map((c) => c.name));
+        const has = (name) => colNames.has(name);
+
+        if (!has('notes')) {
+            db.run('ALTER TABLE book_checkouts ADD COLUMN notes TEXT', (e) => {
+                if (e) {
+                    console.error('Error adding book_checkouts.notes column:', e.message);
+                } else {
+                    console.log('book_checkouts.notes column ensured successfully');
                 }
             });
         }
@@ -187,7 +270,7 @@ function verifyJWTToken(token) {
 //Database helper functions
 async function findUserByEmail(email) {
     return new Promise((resolve, reject) => {
-        const sql = 'SELECT * FROM users WHERE email = ?';
+        const sql = 'SELECT * FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)';
         db.get(sql, [email], (err, row) => {
             if (err) {
                 reject(err);
@@ -200,7 +283,7 @@ async function findUserByEmail(email) {
 
 async function findUserByStudentId(studentId) {
     return new Promise((resolve, reject) => {
-        const sql = 'SELECT * FROM users WHERE student_id = ?';
+        const sql = 'SELECT * FROM users WHERE student_id = ? AND (is_active IS NULL OR is_active = 1)';
         db.get(sql, [studentId], (err, row) => {
             if (err) {
                 reject(err);
@@ -213,58 +296,56 @@ async function findUserByStudentId(studentId) {
 
 async function createUser(userData) {
     return new Promise((resolve, reject) => {
-        // First check if role column exists
-        db.all("PRAGMA table_info(users)", (err, columns) => {
+        db.all('PRAGMA table_info(users)', (err, columns) => {
             if (err) {
                 reject(err);
                 return;
             }
-            
-            const hasRole = columns.some(col => col.name === 'role');
-            const hasStudentId = columns.some(col => col.name === 'student_id');
-            
-            let sql, params;
-            
-            if (hasRole && hasStudentId) {
-                // Full schema with all columns
-                sql = 'INSERT INTO users (user_type, student_id, username, email, password_hash, parent_email, department, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-                params = [
-                    userData.userType,
-                    userData.studentId,
-                    userData.name,
-                    userData.email,
-                    userData.password_hash,
-                    userData.parentEmail,
-                    userData.department,
-                    userData.role
-                ];
-            } else if (hasStudentId) {
-                // Schema without role column
-                sql = 'INSERT INTO users (user_type, student_id, username, email, password_hash, parent_email, department) VALUES (?, ?, ?, ?, ?, ?, ?)';
-                params = [
-                    userData.userType,
-                    userData.studentId,
-                    userData.name,
-                    userData.email,
-                    userData.password_hash,
-                    userData.parentEmail,
-                    userData.department
-                ];
-            } else {
-                // Basic schema without student_id or role
-                sql = 'INSERT INTO users (user_type, username, email, password_hash, parent_email, department) VALUES (?, ?, ?, ?, ?, ?)';
-                params = [
-                    userData.userType,
-                    userData.name,
-                    userData.email,
-                    userData.password_hash,
-                    userData.parentEmail,
-                    userData.department
-                ];
+
+            const colNames = new Set(columns.map((c) => c.name));
+            const has = (name) => colNames.has(name);
+
+            const fields = [];
+            const params = [];
+
+            // Canonical column is `name`, but support older DBs with `username`.
+            if (has('name')) {
+                fields.push('name');
+                params.push(userData.name);
+            } else if (has('username')) {
+                fields.push('username');
+                params.push(userData.name);
             }
-            
-            console.log('Executing SQL:', sql);
-            console.log('With params:', params);
+
+            fields.push('user_type');
+            params.push(userData.userType);
+
+            if (has('student_id')) {
+                fields.push('student_id');
+                params.push(userData.studentId);
+            }
+
+            fields.push('email');
+            params.push(userData.email);
+
+            fields.push('password_hash');
+            params.push(userData.password_hash);
+
+            if (has('parent_email')) {
+                fields.push('parent_email');
+                params.push(userData.parentEmail);
+            }
+            if (has('department')) {
+                fields.push('department');
+                params.push(userData.department);
+            }
+            if (has('role')) {
+                fields.push('role');
+                params.push(userData.role);
+            }
+
+            const placeholders = fields.map(() => '?').join(', ');
+            const sql = `INSERT INTO users (${fields.join(', ')}) VALUES (${placeholders})`;
             
             db.run(sql, params, function(err) {
                 if (err) {
@@ -471,13 +552,24 @@ app.get('/api/books', (req, res) => {
     
     // Format books with checkout info
     const books = rows.map(row => {
+      const totalCopies = row.total_copies ?? null;
+      const availableCopies = row.available_copies ?? null;
+      const computedStatus =
+        typeof availableCopies === 'number'
+          ? availableCopies > 0
+            ? 'available'
+            : 'checked_out'
+          : row.availability_status;
+
       const book = {
         id: row.id,
         title: row.title,
         author: row.author,
         genre: row.genre,
         isbn: row.isbn,
-        availability_status: row.availability_status,
+        availability_status: computedStatus,
+        total_copies: totalCopies,
+        available_copies: availableCopies,
         created_at: row.created_at,
         updated_at: row.updated_at
       };
@@ -517,28 +609,74 @@ app.post('/api/books', (req, res) => {
       return res.status(401).json({ message: 'Invalid token' });
     }
 
-    const { title, author, genre, isbn } = req.body;
+    const { title, author, genre, isbn, total_copies } = req.body;
 
     if (!title || !author) {
       return res.status(400).json({ message: 'Title and author are required' });
     }
 
-    const sql = 'INSERT INTO books (title, author, genre, isbn) VALUES (?, ?, ?, ?)';
+    const totalCopies = Number.isFinite(Number(total_copies)) && Number(total_copies) > 0 ? Number(total_copies) : 1;
+    const availableCopies = totalCopies;
+    const availabilityStatus = availableCopies > 0 ? 'available' : 'checked_out';
 
-    db.run(sql, [title, author, genre, isbn], function(err) {
-      if (err) {
-        return res.status(500).json({ message: 'Failed to add book', error: err.message });
+    // Support older DBs that might not have all columns yet.
+    db.all('PRAGMA table_info(books)', (pragmaErr, cols) => {
+      if (pragmaErr) {
+        return res.status(500).json({ message: 'Database error', error: pragmaErr.message });
       }
 
-      res.status(201).json({
-        message: 'Book added successfully',
-        book: {
-          id: this.lastID,
-          title,
-          author,
-          genre,
-          isbn
+      const colNames = new Set(cols.map((c) => c.name));
+      const has = (name) => colNames.has(name);
+
+      const fields = ['title', 'author'];
+      const params = [title, author];
+
+      if (has('genre')) {
+        fields.push('genre');
+        params.push(genre ?? null);
+      }
+      if (has('isbn')) {
+        fields.push('isbn');
+        params.push(isbn ?? null);
+      }
+      if (has('total_copies')) {
+        fields.push('total_copies');
+        params.push(totalCopies);
+      }
+      if (has('available_copies')) {
+        fields.push('available_copies');
+        params.push(availableCopies);
+      }
+      if (has('availability_status')) {
+        fields.push('availability_status');
+        params.push(availabilityStatus);
+      }
+      if (has('created_by')) {
+        fields.push('created_by');
+        params.push(decoded.userId);
+      }
+
+      const placeholders = fields.map(() => '?').join(', ');
+      const sql = `INSERT INTO books (${fields.join(', ')}) VALUES (${placeholders})`;
+
+      db.run(sql, params, function(err) {
+        if (err) {
+          return res.status(500).json({ message: 'Failed to add book', error: err.message });
         }
+
+        res.status(201).json({
+          message: 'Book added successfully',
+          book: {
+            id: this.lastID,
+            title,
+            author,
+            genre: genre ?? null,
+            isbn: isbn ?? null,
+            total_copies: totalCopies,
+            available_copies: availableCopies,
+            availability_status: availabilityStatus
+          }
+        });
       });
     });
   } catch (error) {
@@ -862,53 +1000,88 @@ app.post('/api/books/:bookId/checkout', (req, res) => {
           return res.status(404).json({ message: 'Book not found' });
         }
 
-        // Check if book is already checked out
+        const usesCopies = typeof book.available_copies === 'number';
+        if (usesCopies && book.available_copies <= 0) {
+          return res.status(400).json({ message: 'No copies available' });
+        }
+
+        // Prevent a student from checking out the same book twice.
         db.get(
-          'SELECT * FROM book_checkouts WHERE book_id = ? AND status = ?',
-          [bookId, 'active'],
-          (err, existingCheckout) => {
+          'SELECT * FROM book_checkouts WHERE user_id = ? AND book_id = ? AND status = ?',
+          [decoded.userId, bookId, 'active'],
+          (err, studentCheckout) => {
             if (err) {
               return res.status(500).json({ message: 'Database error', error: err.message });
             }
-            if (existingCheckout) {
-              return res.status(400).json({ message: 'Book is already checked out' });
+            if (studentCheckout) {
+              return res.status(400).json({ message: 'You already have this book checked out' });
             }
 
-            // Check if student already has this book
-            db.get(
-              'SELECT * FROM book_checkouts WHERE user_id = ? AND book_id = ? AND status = ?',
-              [decoded.userId, bookId, 'active'],
-              (err, studentCheckout) => {
-                if (err) {
-                  return res.status(500).json({ message: 'Database error', error: err.message });
+            // If we don't have copy counts, enforce single active checkout per book.
+            const ensureSingleCopy = (cb) => {
+              if (usesCopies) return cb(null);
+              db.get(
+                'SELECT * FROM book_checkouts WHERE book_id = ? AND status = ?',
+                [bookId, 'active'],
+                (e, existingCheckout) => {
+                  if (e) return cb(e);
+                  if (existingCheckout) return cb(new Error('Book is already checked out'));
+                  return cb(null);
                 }
-                if (studentCheckout) {
-                  return res.status(400).json({ message: 'You already have this book checked out' });
-                }
+              );
+            };
 
-                // Calculate due date (14 days from now)
-                const dueDate = new Date();
-                dueDate.setDate(dueDate.getDate() + 14);
+            ensureSingleCopy((singleCopyErr) => {
+              if (singleCopyErr) {
+                const msg =
+                  singleCopyErr.message === 'Book is already checked out'
+                    ? singleCopyErr.message
+                    : 'Database error';
+                const status = singleCopyErr.message === 'Book is already checked out' ? 400 : 500;
+                return res.status(status).json({ message: msg });
+              }
 
-                // Create checkout
-                db.run(
-                  'INSERT INTO book_checkouts (user_id, book_id, due_date) VALUES (?, ?, ?)',
-                  [decoded.userId, bookId, dueDate.toISOString()],
-                  function(err) {
-                    if (err) {
-                      return res.status(500).json({ message: 'Failed to checkout book', error: err.message });
-                    }
+              // Calculate due date (14 days from now)
+              const dueDate = new Date();
+              dueDate.setDate(dueDate.getDate() + 14);
 
-                    // Update book status
+              // Create checkout
+              db.run(
+                'INSERT INTO book_checkouts (user_id, book_id, due_date) VALUES (?, ?, ?)',
+                [decoded.userId, bookId, dueDate.toISOString()],
+                function(err) {
+                  if (err) {
+                    return res.status(500).json({ message: 'Failed to checkout book', error: err.message });
+                  }
+
+                  if (usesCopies) {
+                    const newAvailable = Math.max(0, (book.available_copies || 0) - 1);
+                    const newStatus = newAvailable > 0 ? 'available' : 'checked_out';
+                    db.run(
+                      'UPDATE books SET available_copies = ?, availability_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                      [newAvailable, newStatus, bookId],
+                      (e) => {
+                        if (e) console.error('Error updating book copies/status:', e);
+                        return res.json({
+                          message: 'Book checked out successfully',
+                          checkout: {
+                            id: this.lastID,
+                            bookId,
+                            userId: decoded.userId,
+                            dueDate: dueDate.toISOString()
+                          },
+                          book: { available_copies: newAvailable, availability_status: newStatus }
+                        });
+                      }
+                    );
+                  } else {
+                    // Legacy behavior: single copy tracked only by status
                     db.run(
                       'UPDATE books SET availability_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                       ['checked_out', bookId],
-                      (err) => {
-                        if (err) {
-                          console.error('Error updating book status:', err);
-                        }
-
-                        res.json({
+                      (e) => {
+                        if (e) console.error('Error updating book status:', e);
+                        return res.json({
                           message: 'Book checked out successfully',
                           checkout: {
                             id: this.lastID,
@@ -920,9 +1093,9 @@ app.post('/api/books/:bookId/checkout', (req, res) => {
                       }
                     );
                   }
-                );
-              }
-            );
+                }
+              );
+            });
           }
         );
       });
@@ -949,57 +1122,78 @@ app.post('/api/books/:bookId/return', (req, res) => {
 
     const bookId = parseInt(req.params.bookId);
 
-    // Find active checkout
-    db.get(
-      'SELECT * FROM book_checkouts WHERE book_id = ? AND status = ?',
-      [bookId, 'active'],
-      (err, checkout) => {
-        if (err) {
-          return res.status(500).json({ message: 'Database error', error: err.message });
+    // Get current user to determine permissions
+    db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], (userErr, user) => {
+      if (userErr) {
+        return res.status(500).json({ message: 'Database error', error: userErr.message });
+      }
+      if (!user) {
+        return res.status(401).json({ message: 'User not found' });
+      }
+
+      const isStaff = user.user_type === 'staff' || user.role === 'admin' || user.user_type === 'admin';
+
+      const checkoutSql = isStaff
+        ? 'SELECT * FROM book_checkouts WHERE book_id = ? AND status = ? ORDER BY checkout_date ASC LIMIT 1'
+        : 'SELECT * FROM book_checkouts WHERE book_id = ? AND user_id = ? AND status = ? ORDER BY checkout_date ASC LIMIT 1';
+      const checkoutParams = isStaff ? [bookId, 'active'] : [bookId, decoded.userId, 'active'];
+
+      db.get(checkoutSql, checkoutParams, (checkoutErr, checkout) => {
+        if (checkoutErr) {
+          return res.status(500).json({ message: 'Database error', error: checkoutErr.message });
         }
         if (!checkout) {
           return res.status(404).json({ message: 'No active checkout found for this book' });
         }
 
-        // Check if user is the one who checked it out or is staff/admin
-        db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], (err, user) => {
-          if (err) {
-            return res.status(500).json({ message: 'Database error', error: err.message });
-          }
-          if (!user) {
-            return res.status(401).json({ message: 'User not found' });
-          }
+        // Update checkout status
+        db.run(
+          'UPDATE book_checkouts SET status = ?, return_date = CURRENT_TIMESTAMP WHERE id = ?',
+          ['returned', checkout.id],
+          (updateErr) => {
+            if (updateErr) {
+              return res.status(500).json({ message: 'Failed to return book', error: updateErr.message });
+            }
 
-          if (checkout.user_id !== decoded.userId && user.user_type !== 'staff' && user.role !== 'admin') {
-            return res.status(403).json({ message: 'You can only return books you checked out' });
-          }
-
-          // Update checkout status
-          db.run(
-            'UPDATE book_checkouts SET status = ?, return_date = CURRENT_TIMESTAMP WHERE id = ?',
-            ['returned', checkout.id],
-            (err) => {
-              if (err) {
-                return res.status(500).json({ message: 'Failed to return book', error: err.message });
+            // Update book counters/status if available_copies exists
+            db.get('SELECT * FROM books WHERE id = ?', [bookId], (bookErr, book) => {
+              if (bookErr) {
+                return res.status(500).json({ message: 'Database error', error: bookErr.message });
+              }
+              if (!book) {
+                return res.json({ message: 'Book returned successfully' });
               }
 
-              // Update book status
-              db.run(
-                'UPDATE books SET availability_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-                ['available', bookId],
-                (err) => {
-                  if (err) {
-                    console.error('Error updating book status:', err);
+              const usesCopies = typeof book.available_copies === 'number';
+              if (usesCopies) {
+                const newAvailable = (book.available_copies || 0) + 1;
+                const newStatus = newAvailable > 0 ? 'available' : 'checked_out';
+                db.run(
+                  'UPDATE books SET available_copies = ?, availability_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                  [newAvailable, newStatus, bookId],
+                  (e) => {
+                    if (e) console.error('Error updating book copies/status:', e);
+                    return res.json({
+                      message: 'Book returned successfully',
+                      book: { available_copies: newAvailable, availability_status: newStatus }
+                    });
                   }
-
-                  res.json({ message: 'Book returned successfully' });
-                }
-              );
-            }
-          );
-        });
-      }
-    );
+                );
+              } else {
+                db.run(
+                  'UPDATE books SET availability_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                  ['available', bookId],
+                  (e) => {
+                    if (e) console.error('Error updating book status:', e);
+                    return res.json({ message: 'Book returned successfully' });
+                  }
+                );
+              }
+            });
+          }
+        );
+      });
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
